@@ -326,17 +326,20 @@ data "aws_iam_policy_document" "developer_additional" {
     resources = ["arn:aws:iam::*:user/cicd-member-user"]
   }
 
-  statement {
-    sid       = "iamForECSAllow"
-    effect    = "Allow"
-    actions   = ["iam:PassRole"]
-    resources = ["*"]
-    condition {
-      test     = "StringEquals"
-      variable = "iam:PassedToService"
-      values   = ["ecs.amazonaws.com"]
-    }
+statement {
+  sid       = "AllowPassRoles"
+  effect    = "Allow"
+  actions   = ["iam:PassRole"]
+  resources = ["*"]
+  condition {
+    test     = "StringEquals"
+    variable = "iam:PassedToService"
+    values   = [
+      "ecs.amazonaws.com",
+      "malware-protection-plan.guardduty.amazonaws.com"
+    ]
   }
+}
 
   statement {
     sid    = "cloudWatchCrossAccountAllow"
