@@ -8,7 +8,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/aws/aws-lambda-go/events"
@@ -16,7 +15,6 @@ import (
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/cloudtrail"
-	"github.com/aws/aws-sdk-go/service/cloudwatch"
 	"github.com/aws/aws-sdk-go/service/cloudwatchlogs"
 	"github.com/aws/aws-sdk-go/service/iam"
 )
@@ -130,41 +128,14 @@ func searchCloudTrailLogs(sess *session.Session, alarmArn string, stateChangeTim
 	return "Unknown", nil
 }
 
-func getMetricFilteryes(sess *session.Session, alarmArn string) (*cloudwatchlogs.MetricFilter, error) {
-	cw := cloudwatch.New(sess)
+func getMetricFilter(sess *session.Session, alarmArn string) (*cloudwatchlogs.MetricFilter, error) {
+	// Define the log group name directly
+	logGroupName := "cloudtrail"
 
-	// Extract the alarm name from the ARN
-	parts := strings.Split(alarmArn, ":")
-	if len(parts) < 7 {
-		return nil, fmt.Errorf("invalid alarm ARN: %s", alarmArn)
-	}
-	alarmName := parts[6]
-
-	// Get Alarm Details
-	alarmDetails, err := cw.DescribeAlarms(&cloudwatch.DescribeAlarmsInput{
-		AlarmNames: []*string{aws.String(alarmName)},
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to describe alarm: %v", err)
-	}
-	if len(alarmDetails.MetricAlarms) == 0 {
-		return nil, fmt.Errorf("alarm %s not found", alarmName)
-	}
-
-	// Extract Metric Filter Name
-	alarm := alarmDetails.MetricAlarms[0]
-	logGroupName := ""
-	for _, dim := range alarm.Dimensions {
-		if aws.StringValue(dim.Name) == "LogGroupName" { // Adjust key if needed
-			logGroupName = aws.StringValue(dim.Value)
-			break
-		}
-	}
-	if logGroupName == "" {
-		return nil, fmt.Errorf("no log group name found in alarm dimensions")
-	}
-
+	// Create a CloudWatch Logs client
 	cwLogs := cloudwatchlogs.New(sess)
+
+	// Fetch the metric filters for the hardcoded log group
 	filters, err := cwLogs.DescribeMetricFilters(&cloudwatchlogs.DescribeMetricFiltersInput{
 		LogGroupName: aws.String(logGroupName),
 	})
@@ -175,6 +146,7 @@ func getMetricFilteryes(sess *session.Session, alarmArn string) (*cloudwatchlogs
 		return nil, fmt.Errorf("no metric filters found for log group: %s", logGroupName)
 	}
 
+	// Return the first metric filter
 	return filters.MetricFilters[0], nil
 }
 
@@ -233,7 +205,7 @@ func handler(ctx context.Context, snsEvent events.SNSEvent) error {
 			RoutingKey:  os.Getenv("PAGERDUTY_INTEGRATION_KEY"), // Set in Lambda environment variables
 			EventAction: "trigger",
 			Payload: PagerDutyPayload{
-				Summary:       fmt.Sprintf("Alarm Triggered: %s AWS Account: %s (%s)", alarmName, accountAlias, accountID),
+				Summary:       fmt.Sprintf("CloudWatch Alarm | %s | Account: %s (%s)", alarmName, accountAlias, accountID),
 				Source:        fmt.Sprintf("AWS Account: %s (%s)", accountAlias, accountID),
 				Severity:      "critical",
 				CustomDetails: customDetails,
