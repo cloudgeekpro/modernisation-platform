@@ -32,6 +32,8 @@ type PagerDutyPayload struct {
 	CustomDetails map[string]interface{} `json:"custom_details"`
 }
 
+// getAccountAlias retrieves the AWS account alias for the current session.
+// Returns "NoAlias" if no alias is set or if there's an error.
 func getAccountAlias(sess *session.Session) (string, error) {
 	svc := iam.New(sess)
 	result, err := svc.ListAccountAliases(&iam.ListAccountAliasesInput{})
@@ -44,6 +46,8 @@ func getAccountAlias(sess *session.Session) (string, error) {
 	return "NoAlias", nil
 }
 
+// sendToPagerDuty sends a PagerDuty event to the PagerDuty API.
+// Retries are handled by the caller function.
 func sendToPagerDuty(event PagerDutyEvent) error {
 	payloadBytes, err := json.Marshal(event)
 	if err != nil {
@@ -71,38 +75,39 @@ func sendToPagerDuty(event PagerDutyEvent) error {
 	return nil
 }
 
+// searchCloudTrailLogs searches for CloudTrail events near the time of the alarm.
+// The filter pattern associated with the alarm is used to narrow down the results.
 func searchCloudTrailLogs(sess *session.Session, alarmArn string, stateChangeTime string) (string, error) {
 	ct := cloudtrail.New(sess)
 
-	// Define the custom time layout
+	// Define the custom time layout for parsing the state change time.
 	const customTimeLayout = "2006-01-02T15:04:05.000-0700"
-
-	// Parse the state change time using the custom layout
 	eventTime, err := time.Parse(customTimeLayout, stateChangeTime)
 	if err != nil {
 		return "", fmt.Errorf("failed to parse state change time: %v", err)
 	}
 
-	// Define the time range for the CloudTrail query
-	startTime := eventTime.Add(-5 * time.Minute)
-	endTime := eventTime.Add(5 * time.Minute)
+	// Define the time range for querying CloudTrail logs.
+	startTime := eventTime.Add(-10 * time.Minute)
+	endTime := eventTime.Add(10 * time.Minute)
 
-	// Get the metric filter details
+	// Retrieve the metric filter pattern associated with the alarm.
 	metricFilter, err := getMetricFilter(sess, alarmArn)
 	if err != nil {
 		return "", fmt.Errorf("failed to get metric filter: %v", err)
 	}
 
-	// Query CloudTrail logs using the metric filter pattern
+	filterPattern := aws.StringValue(metricFilter.FilterPattern)
+	if filterPattern == "" {
+		return "", fmt.Errorf("filter pattern is empty for alarm: %s", alarmArn)
+	}
+
+	log.Printf("Using filter pattern: %s", filterPattern)
+
+	// Query CloudTrail logs using the defined time range.
 	input := &cloudtrail.LookupEventsInput{
 		StartTime: aws.Time(startTime),
 		EndTime:   aws.Time(endTime),
-		LookupAttributes: []*cloudtrail.LookupAttribute{
-			{
-				AttributeKey:   aws.String(cloudtrail.LookupAttributeKeyEventName),
-				AttributeValue: aws.String(*metricFilter.FilterPattern),
-			},
-		},
 	}
 
 	result, err := ct.LookupEvents(input)
@@ -110,7 +115,7 @@ func searchCloudTrailLogs(sess *session.Session, alarmArn string, stateChangeTim
 		return "", fmt.Errorf("failed to lookup CloudTrail events: %v", err)
 	}
 
-	// Extract the user identity from the CloudTrail logs
+	// Parse the CloudTrail logs to extract the user identity.
 	for _, event := range result.Events {
 		var eventData map[string]interface{}
 		if err := json.Unmarshal([]byte(*event.CloudTrailEvent), &eventData); err != nil {
@@ -118,24 +123,27 @@ func searchCloudTrailLogs(sess *session.Session, alarmArn string, stateChangeTim
 			continue
 		}
 
-		if userIdentity, ok := eventData["userIdentity"].(map[string]interface{}); ok {
-			if userName, ok := userIdentity["userName"].(string); ok {
-				return userName, nil
+		// Check if the event matches the filter pattern.
+		if matchesFilterPattern(eventData, filterPattern) {
+			if userIdentity, ok := eventData["userIdentity"].(map[string]interface{}); ok {
+				if userName, ok := userIdentity["userName"].(string); ok {
+					return userName, nil
+				}
 			}
 		}
 	}
 
+	// Return "Unknown" if no matching user identity is found.
 	return "Unknown", nil
 }
 
+// getMetricFilter retrieves the metric filter associated with the alarm's log group.
 func getMetricFilter(sess *session.Session, alarmArn string) (*cloudwatchlogs.MetricFilter, error) {
-	// Define the log group name directly
+	// Define the log group name directly as "cloudtrail".
 	logGroupName := "cloudtrail"
-
-	// Create a CloudWatch Logs client
 	cwLogs := cloudwatchlogs.New(sess)
 
-	// Fetch the metric filters for the hardcoded log group
+	// Fetch all metric filters for the specified log group.
 	filters, err := cwLogs.DescribeMetricFilters(&cloudwatchlogs.DescribeMetricFiltersInput{
 		LogGroupName: aws.String(logGroupName),
 	})
@@ -146,32 +154,43 @@ func getMetricFilter(sess *session.Session, alarmArn string) (*cloudwatchlogs.Me
 		return nil, fmt.Errorf("no metric filters found for log group: %s", logGroupName)
 	}
 
-	// Return the first metric filter
+	// Return the first metric filter found (assuming it's relevant).
 	return filters.MetricFilters[0], nil
 }
 
+// matchesFilterPattern checks if a CloudTrail event matches the provided filter pattern.
+func matchesFilterPattern(eventData map[string]interface{}, filterPattern string) bool {
+	if eventName, ok := eventData["eventName"].(string); ok {
+		return eventName == filterPattern
+	}
+	return false
+}
+
+// handler processes the incoming SNS event, searches CloudTrail, and sends an alert to PagerDuty.
 func handler(ctx context.Context, snsEvent events.SNSEvent) error {
-	// AWS session for fetching account alias and CloudTrail logs
+	// Initialize an AWS session.
 	sess := session.Must(session.NewSession())
+
+	// Get the AWS account alias.
 	accountAlias, err := getAccountAlias(sess)
 	if err != nil {
 		log.Printf("Failed to retrieve account alias: %v", err)
 		accountAlias = "Unknown"
 	}
 
-	// Loop through records in the SNS event
+	// Process each SNS record.
 	for _, record := range snsEvent.Records {
 		snsMessage := record.SNS.Message
 		log.Printf("Processing SNS message: %s", snsMessage)
 
-		// Parse the SNS message to extract alarm details (JSON expected)
+		// Parse the SNS message into a structured format.
 		var alarmDetails map[string]interface{}
 		if err := json.Unmarshal([]byte(snsMessage), &alarmDetails); err != nil {
 			log.Printf("Failed to parse SNS message: %v", err)
 			continue
 		}
 
-		// Extract relevant fields (modify as needed for your SNS payload)
+		// Extract alarm details from the message.
 		alarmName := alarmDetails["AlarmName"].(string)
 		accountID := alarmDetails["AWSAccountId"].(string)
 		alarmArn := alarmDetails["AlarmArn"].(string)
@@ -180,14 +199,14 @@ func handler(ctx context.Context, snsEvent events.SNSEvent) error {
 		newStateValue := alarmDetails["NewStateValue"].(string)
 		stateChangeTime := alarmDetails["StateChangeTime"].(string)
 
-		// Search CloudTrail logs to find the user identity
+		// Search CloudTrail logs to find the user identity.
 		userIdentity, err := searchCloudTrailLogs(sess, alarmArn, stateChangeTime)
 		if err != nil {
 			log.Printf("Failed to search CloudTrail logs: %v", err)
 			userIdentity = "Unknown"
 		}
 
-		// Construct custom details
+		// Build custom details for the PagerDuty event.
 		customDetails := map[string]interface{}{
 			"Account Name":      accountAlias,
 			"AWS Account Id":    accountID,
@@ -200,9 +219,9 @@ func handler(ctx context.Context, snsEvent events.SNSEvent) error {
 			"User Identity":     userIdentity,
 		}
 
-		// Construct PagerDuty event
+		// Construct the PagerDuty event.
 		pagerDutyEvent := PagerDutyEvent{
-			RoutingKey:  os.Getenv("PAGERDUTY_INTEGRATION_KEY"), // Set in Lambda environment variables
+			RoutingKey:  os.Getenv("PAGERDUTY_INTEGRATION_KEY"),
 			EventAction: "trigger",
 			Payload: PagerDutyPayload{
 				Summary:       fmt.Sprintf("CloudWatch Alarm | %s | Account: %s (%s)", alarmName, accountAlias, accountID),
@@ -212,14 +231,14 @@ func handler(ctx context.Context, snsEvent events.SNSEvent) error {
 			},
 		}
 
-		// Send the enriched alert to PagerDuty with retry and backoff
+		// Send the event to PagerDuty with retries and exponential backoff.
 		retries := 3
 		for i := 0; i < retries; i++ {
 			err := sendToPagerDuty(pagerDutyEvent)
 			if err != nil {
 				if i < retries-1 {
 					log.Printf("Retrying to send alert to PagerDuty: attempt %d", i+2)
-					time.Sleep(time.Duration(i+1) * time.Second) // Exponential backoff
+					time.Sleep(time.Duration(i+1) * time.Second)
 					continue
 				}
 				log.Printf("Failed to send alert to PagerDuty after %d attempts: %v", retries, err)
@@ -232,6 +251,7 @@ func handler(ctx context.Context, snsEvent events.SNSEvent) error {
 	return nil
 }
 
+// main is the entry point for the Lambda function.
 func main() {
 	lambda.Start(handler)
 }
