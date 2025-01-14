@@ -19,7 +19,7 @@ defaults:
     shell: bash
 
 jobs:
-    monitor-ecs-eks-amis:
+    monitor-iam-roles:
         runs-on: ubuntu-latest
 
         steps:
