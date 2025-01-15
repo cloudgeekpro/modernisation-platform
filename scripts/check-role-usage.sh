@@ -1,31 +1,38 @@
 #!/bin/bash
 
-# Set values
+set -euo pipefail
+
 export AWS_PAGER=""
 regions="eu-west-2"
-ROOT_AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID
-ROOT_AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY
-ROOT_AWS_SESSION_TOKEN=$AWS_SESSION_TOKEN
-
 ROLE_NAME="ModernisationPlatformAccess"
-OUTPUT_FILE="ssm-automation-role-report.csv"
+OUTPUT_FILE="common-roles-report.csv"
+TEMP_DIR="temp_roles"
+COMMON_ROLES_FILE="$TEMP_DIR/common_roles.txt"
 
-## Initialize the output file with headers
-echo "Account Name,Account ID,Region,Role Name,ARN" > $OUTPUT_FILE
+# Initialize output file with headers
+echo "Role Name,ARN" > $OUTPUT_FILE
+
+# Create temporary directory for role lists
+mkdir -p $TEMP_DIR
+rm -f $TEMP_DIR/*
 
 # Assume Role Function
 getAssumeRoleCfg() {
     account_id=$1
     echo "Assuming role for account: $account_id"
-    if ! aws sts assume-role --role-arn "arn:aws:iam::${account_id}:role/${ROLE_NAME}" --role-session-name "list-iam-roles" --output json > credentials.json; then
+
+    # Clear credentials
+    unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
+
+    if ! creds=$(aws sts assume-role --role-arn "arn:aws:iam::${account_id}:role/${ROLE_NAME}" --role-session-name "list-iam-roles" --output json 2>/dev/null); then
         echo "Error: Failed to assume role for account $account_id. Skipping..."
         return 1
     fi
-    export AWS_ACCESS_KEY_ID=$(jq -r '.Credentials.AccessKeyId' credentials.json)
-    export AWS_SECRET_ACCESS_KEY=$(jq -r '.Credentials.SecretAccessKey' credentials.json)
-    export AWS_SESSION_TOKEN=$(jq -r '.Credentials.SessionToken' credentials.json)
-}
 
+    export AWS_ACCESS_KEY_ID=$(echo "$creds" | jq -r '.Credentials.AccessKeyId')
+    export AWS_SECRET_ACCESS_KEY=$(echo "$creds" | jq -r '.Credentials.SecretAccessKey')
+    export AWS_SESSION_TOKEN=$(echo "$creds" | jq -r '.Credentials.SessionToken')
+}
 
 # Main logic
 first_account=true
@@ -66,9 +73,7 @@ for role_name in $(cat "$COMMON_ROLES_FILE"); do
         fi
     done
 done
-     # Reset credentials after each account
-    export AWS_ACCESS_KEY_ID=$ROOT_AWS_ACCESS_KEY_ID
-    export AWS_SECRET_ACCESS_KEY=$ROOT_AWS_SECRET_ACCESS_KEY
-    export AWS_SESSION_TOKEN=$ROOT_AWS_SESSION_TOKEN
-    rm credentials.json
-done
+
+# Cleanup
+rm -rf $TEMP_DIR
+echo "Script execution completed. Common roles saved to $OUTPUT_FILE."
