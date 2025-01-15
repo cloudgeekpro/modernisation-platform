@@ -22,9 +22,10 @@ workspace_map[production]="prod"
 declare -A account_roles
 declare -A normalized_roles
 declare -A role_counts
+declare -A last_accessed_dates
 
 # Initialize the output file with headers
-echo -n "Role Name" > $OUTPUT_FILE
+echo -n "Role Name,Last Accessed" > $OUTPUT_FILE
 for workspace in "${workspace_map[@]}"; do
     echo -n ",$workspace" >> $OUTPUT_FILE
 done
@@ -74,6 +75,13 @@ process_roles() {
             account_roles["$workspace,$base_name"]="Yes"
             normalized_roles["$base_name"]="$role"
             role_counts["$base_name"]=$((role_counts["$base_name"] + 1))
+
+            # Fetch last accessed date
+            last_used=$(aws iam get-role --role-name "$role" \
+                --query 'Role.RoleLastUsed.LastUsedDate' --output text 2>/dev/null || echo "N/A")
+            if [[ "$last_used" != "N/A" ]]; then
+                last_accessed_dates["$base_name"]="$last_used"
+            fi
         done
     done
 }
@@ -117,10 +125,11 @@ most_common_roles=$(for role in "${!role_counts[@]}"; do
     echo "${role_counts[$role]} $role"
 done | sort -nr | head -n "$MOST_COMMON_LIMIT" | awk '{print $2}' || true)
 
-# Write the most common roles with workspace presence to the output file
+# Write the most common roles with workspace presence and last accessed date to the output file
 for role in $most_common_roles; do
     original_name=${normalized_roles[$role]}
-    echo -n "$original_name" >> $OUTPUT_FILE
+    last_accessed=${last_accessed_dates[$role]:-"N/A"}
+    echo -n "$original_name,$last_accessed" >> $OUTPUT_FILE
     for workspace in "${workspace_map[@]}"; do
         if [[ -n "${account_roles["$workspace,$role"]}" ]]; then
             echo -n ",Yes" >> $OUTPUT_FILE
