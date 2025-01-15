@@ -12,7 +12,7 @@ OUTPUT_FILE="common-roles-report.csv"
 TEMP_DIR="temp_roles"
 
 ## Initialize the output file with headers
-echo "Role Name" > $OUTPUT_FILE
+echo "Role Name,Occurrences" > $OUTPUT_FILE
 
 # Create a temporary directory for role files
 mkdir -p $TEMP_DIR
@@ -47,17 +47,15 @@ for account_id in $(jq -r '.account_ids | to_entries[] | "\(.value)"' <<< "$ENVI
         # List all IAM roles in the account, excluding AWSServiceRoleFor
         roles=$(aws iam list-roles --region "$region" \
             --query "Roles[?!(starts_with(RoleName, 'AWSServiceRoleFor'))].[RoleName]" \
-            --output text | tr '\t' '\n')
+            --output text)
 
         echo "Roles found for account $account_id in region $region:"
         echo "$roles"
 
-        # Normalize role names and save to temp directory
+        # Save roles to temp directory (no normalization, preserve original names)
         if [[ -n "$roles" ]]; then
-            echo "$roles" | awk '{print tolower($0)}' | sed 's/^ *//;s/ *$//' | sort > "$TEMP_DIR/$account_id.txt"
+            echo "$roles" | sed 's/^ *//;s/ *$//' | sort > "$TEMP_DIR/$account_id.txt"
             echo "Saved roles for $account_id to $TEMP_DIR/$account_id.txt"
-            echo "Roles saved for account $account_id:"
-            cat "$TEMP_DIR/$account_id.txt"
         else
             echo "Warning: No roles found for account $account_id in region $region."
             touch "$TEMP_DIR/$account_id-empty.txt"
@@ -77,31 +75,19 @@ if [[ -z "$(ls -A $TEMP_DIR | grep -v empty.txt)" ]]; then
     exit 1
 fi
 
-# Find common roles across all accounts
-valid_files=$(ls $TEMP_DIR/*.txt | grep -v empty.txt)
-cp "$(echo $valid_files | cut -d ' ' -f 1)" "$TEMP_DIR/common_roles.txt"
+# Combine all roles from all accounts into one file
+cat $TEMP_DIR/*.txt > "$TEMP_DIR/all_roles.txt"
 
-for file in $valid_files; do
-    echo "Processing file: $file"
-    echo "Current roles in temp file ($file):"
-    cat "$file"
-    echo "Current common roles before processing $file:"
-    cat "$TEMP_DIR/common_roles.txt"
-    comm -12 <(sort -f "$TEMP_DIR/common_roles.txt") <(sort -f "$file") > "$TEMP_DIR/common_roles.tmp"
-    mv "$TEMP_DIR/common_roles.tmp" "$TEMP_DIR/common_roles.txt"
-    echo "Updated common roles after processing $file:"
-    cat "$TEMP_DIR/common_roles.txt"
-done
+# Count occurrences of each role
+sort "$TEMP_DIR/all_roles.txt" | uniq -c | sort -nr > "$TEMP_DIR/role_counts.txt"
 
-# Ensure common roles file exists
-if [[ ! -s "$TEMP_DIR/common_roles.txt" ]]; then
-    echo "Error: No common roles found across accounts."
-    exit 1
-fi
-
-# Output common roles
-cat "$TEMP_DIR/common_roles.txt" >> "$OUTPUT_FILE"
+# Save most common roles to the output file
+while IFS= read -r line; do
+    count=$(echo "$line" | awk '{print $1}')
+    role=$(echo "$line" | awk '{$1=""; print $0}' | sed 's/^ *//;s/ *$//')
+    echo "$role,$count" >> "$OUTPUT_FILE"
+done < "$TEMP_DIR/role_counts.txt"
 
 # Cleanup
 rm -rf $TEMP_DIR
-echo "Script execution completed. Common roles saved to $OUTPUT_FILE."
+echo "Script execution completed. Role counts saved to $OUTPUT_FILE."
