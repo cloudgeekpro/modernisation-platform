@@ -18,8 +18,8 @@ getAssumeRoleCfg() {
     account_id=$1
     echo "Assuming role for account: $account_id"
     if ! aws sts assume-role --role-arn "arn:aws:iam::${account_id}:role/${ROLE_NAME}" --role-session-name "list-iam-roles" --output json > credentials.json; then
-        echo "Error: Failed to assume role for account $account_id"
-        exit 1
+        echo "Error: Failed to assume role for account $account_id. Skipping..."
+        return 1
     fi
     export AWS_ACCESS_KEY_ID=$(jq -r '.Credentials.AccessKeyId' credentials.json)
     export AWS_SECRET_ACCESS_KEY=$(jq -r '.Credentials.SecretAccessKey' credentials.json)
@@ -30,14 +30,17 @@ getAssumeRoleCfg() {
 for account_id in $(jq -r '.account_ids | to_entries[] | "\(.value)"' <<< "$ENVIRONMENT_MANAGEMENT"); do
     account_name=$(jq -r ".account_ids | to_entries[] | select(.value==\"$account_id\").key" <<< "$ENVIRONMENT_MANAGEMENT")
     echo "Processing account: $account_name ($account_id)"
-    getAssumeRoleCfg "$account_id"
+    if ! getAssumeRoleCfg "$account_id"; then
+        echo "$account_name,$account_id,,Error,Failed to assume role" >> $OUTPUT_FILE
+        continue
+    fi
 
     for region in $regions; do
         echo "Region: $region"
         AWS_REGION=$region
 
         # List all IAM roles in the account
-        roles=$(aws iam list-roles --region $AWS_REGION --query "Roles[].[RoleName,Arn]" --output text)
+        roles=$(aws iam list-roles --region $AWS_REGION --query "Roles[?!(starts_with(RoleName, 'AWSServiceRoleFor'))].[RoleName,Arn]" --output text)
         echo "Debug: IAM roles found in account $account_id, region $region:"
         echo "$roles"
 
