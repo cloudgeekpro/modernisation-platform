@@ -45,13 +45,14 @@ for account_id in $(jq -r '.account_ids | to_entries[] | "\(.value)"' <<< "$ENVI
         AWS_REGION=$region
 
         # List all IAM roles in the account
-        roles=$(aws iam list-roles --region $AWS_REGION --query "Roles[?!(starts_with(RoleName, 'AWSServiceRoleFor'))].[RoleName,Arn]" --output text)
+        roles=$(aws iam list-roles --region "$region" --query "Roles[?!(starts_with(RoleName, 'AWSServiceRoleFor'))].[RoleName,Arn]" --output text)
         echo "Roles found for account $account_id in region $region:"
         echo "$roles"
         if [[ -n "$roles" ]]; then
             echo "$roles" | awk '{print $1}' > "$TEMP_DIR/$account_id.txt"
         else
             echo "Warning: No roles found for account $account_id in region $region."
+            touch "$TEMP_DIR/$account_id-empty.txt"
         fi
     done
 
@@ -63,14 +64,16 @@ for account_id in $(jq -r '.account_ids | to_entries[] | "\(.value)"' <<< "$ENVI
 done
 
 # Check temp files
-if [[ -z "$(ls -A $TEMP_DIR)" ]]; then
+if [[ -z "$(ls -A $TEMP_DIR | grep -v empty.txt)" ]]; then
     echo "Error: No roles found in any account. Exiting."
     exit 1
 fi
 
 # Find common roles across all accounts
-cp "$(ls $TEMP_DIR | head -n 1)" "$TEMP_DIR/common_roles.txt"
-for file in $TEMP_DIR/*.txt; do
+valid_files=$(ls $TEMP_DIR/*.txt | grep -v empty.txt)
+cp "$(echo $valid_files | cut -d ' ' -f 1)" "$TEMP_DIR/common_roles.txt"
+
+for file in $valid_files; do
     comm -12 <(sort "$TEMP_DIR/common_roles.txt") <(sort "$file") > "$TEMP_DIR/common_roles.tmp"
     mv "$TEMP_DIR/common_roles.tmp" "$TEMP_DIR/common_roles.txt"
 done
@@ -83,7 +86,7 @@ fi
 
 # Output common roles with ARNs and Last Accessed Dates
 for role_name in $(cat "$TEMP_DIR/common_roles.txt"); do
-    for file in $TEMP_DIR/*.txt; do
+    for file in $valid_files; do
         if grep -q "^$role_name " "$file"; then
             arn=$(grep "^$role_name " "$file" | awk '{print $2}')
             last_accessed=$(aws iam get-role --role-name "$role_name" --query 'Role.RoleLastUsed.LastUsedDate' --output text 2>/dev/null || echo "N/A")
