@@ -48,11 +48,10 @@ for account_id in $(jq -r '.account_ids | to_entries[] | "\(.value)"' <<< "$ENVI
         roles=$(aws iam list-roles --region "$region" --query "Roles[?!(starts_with(RoleName, 'AWSServiceRoleFor'))].[RoleName]" --output text)
         echo "Roles found for account $account_id in region $region:"
         echo "$roles"
+
+        # Save roles to temp directory and sort
         if [[ -n "$roles" ]]; then
-            for role_name in $roles; do
-                last_accessed=$(aws iam get-role --role-name "$role_name" --query 'Role.RoleLastUsed.LastUsedDate' --output text 2>/dev/null || echo "N/A")
-                echo "$role_name,$account_name,$last_accessed" >> "$TEMP_DIR/$account_id.txt"
-            done
+            echo "$roles" | awk '{print tolower($0)}' | sed 's/^ *//;s/ *$//' | sort > "$TEMP_DIR/$account_id.txt"
         else
             echo "Warning: No roles found for account $account_id in region $region."
             touch "$TEMP_DIR/$account_id-empty.txt"
@@ -77,10 +76,10 @@ valid_files=$(ls $TEMP_DIR/*.txt | grep -v empty.txt)
 cp "$(echo $valid_files | cut -d ' ' -f 1)" "$TEMP_DIR/common_roles.txt"
 
 for file in $valid_files; do
-    echo "Comparing with file: $file"
+    echo "Processing file: $file"
     echo "Current common roles:"
     cat "$TEMP_DIR/common_roles.txt"
-    comm -12 <(sort -f "$TEMP_DIR/common_roles.txt" | cut -d ',' -f 1) <(sort -f "$file" | cut -d ',' -f 1) > "$TEMP_DIR/common_roles.tmp"
+    comm -12 <(sort -f "$TEMP_DIR/common_roles.txt") <(sort -f "$file") > "$TEMP_DIR/common_roles.tmp"
     mv "$TEMP_DIR/common_roles.tmp" "$TEMP_DIR/common_roles.txt"
 done
 
