@@ -9,21 +9,24 @@ ROOT_AWS_SESSION_TOKEN=$AWS_SESSION_TOKEN
 
 ROLE_NAME="ModernisationPlatformAccess"
 OUTPUT_FILE="common-roles-report.csv"
-TEMP_DIR="temp_roles"
 
-## Initialize the output file with headers
-echo "Workspace,Role Name,Occurrences" > $OUTPUT_FILE
-
-# Create a temporary directory for role files
-mkdir -p $TEMP_DIR
-rm -f $TEMP_DIR/*
-
-# Workspace mapping (adjust as needed)
+## Initialize workspace mapping
 declare -A workspace_map
 workspace_map[development]="dev"
 workspace_map[test]="test"
 workspace_map[preproduction]="preprod"
 workspace_map[production]="prod"
+
+# Declare associative arrays
+declare -A account_roles
+declare -A all_roles
+
+# Initialize the output file with headers
+echo -n "Role Name" > $OUTPUT_FILE
+for workspace in "${workspace_map[@]}"; do
+    echo -n ",$workspace" >> $OUTPUT_FILE
+done
+echo >> $OUTPUT_FILE
 
 # Assume Role Function
 getAssumeRoleCfg() {
@@ -38,12 +41,36 @@ getAssumeRoleCfg() {
     export AWS_SESSION_TOKEN=$(jq -r '.Credentials.SessionToken' credentials.json)
 }
 
+# Fetch roles and process
+process_roles() {
+    account_id=$1
+    workspace=$2
+
+    for region in $regions; do
+        echo "Fetching roles for account $account_id in region $region..."
+        roles=$(aws iam list-roles --region "$region" \
+            --query "Roles[?!(starts_with(RoleName, 'AWSServiceRoleFor'))].[RoleName]" \
+            --output text | sed 's/^ *//;s/ *$//')
+
+        if [[ -z "$roles" ]]; then
+            echo "Warning: No roles found for account $account_id in region $region."
+            continue
+        fi
+
+        # Add roles to account_roles for this workspace
+        for role in $roles; do
+            account_roles["$workspace,$role"]="Yes"
+            all_roles["$role"]=1
+        done
+    done
+}
+
 # Main logic
 for account_id in $(jq -r '.account_ids | to_entries[] | "\(.value)"' <<< "$ENVIRONMENT_MANAGEMENT"); do
     account_name=$(jq -r ".account_ids | to_entries[] | select(.value==\"$account_id\").key" <<< "$ENVIRONMENT_MANAGEMENT")
     workspace="unknown"
 
-    # Identify workspace based on account name (adjust logic as needed)
+    # Identify workspace based on account name
     for key in "${!workspace_map[@]}"; do
         if [[ "$account_name" == *"$key"* ]]; then
             workspace=${workspace_map[$key]}
@@ -57,27 +84,8 @@ for account_id in $(jq -r '.account_ids | to_entries[] | "\(.value)"' <<< "$ENVI
         continue
     fi
 
-    for region in $regions; do
-        echo "Region: $region"
-        AWS_REGION=$region
-
-        # List all IAM roles in the account, excluding AWSServiceRoleFor
-        roles=$(aws iam list-roles --region "$region" \
-            --query "Roles[?!(starts_with(RoleName, 'AWSServiceRoleFor'))].[RoleName]" \
-            --output text)
-
-        echo "Roles found for account $account_id in region $region:"
-        echo "$roles"
-
-        # Save roles to temp directory (include workspace prefix for grouping)
-        if [[ -n "$roles" ]]; then
-            echo "$roles" | sed 's/^ *//;s/ *$//' | sort > "$TEMP_DIR/$workspace-$account_id.txt"
-            echo "Saved roles for $account_id to $TEMP_DIR/$workspace-$account_id.txt"
-        else
-            echo "Warning: No roles found for account $account_id in region $region."
-            touch "$TEMP_DIR/$workspace-$account_id-empty.txt"
-        fi
-    done
+    # Fetch and process roles for this account
+    process_roles "$account_id" "$workspace"
 
     # Reset credentials after each account
     export AWS_ACCESS_KEY_ID=$ROOT_AWS_ACCESS_KEY_ID
@@ -86,31 +94,17 @@ for account_id in $(jq -r '.account_ids | to_entries[] | "\(.value)"' <<< "$ENVI
     rm -f credentials.json
 done
 
-# Check temp files
-if [[ -z "$(ls -A $TEMP_DIR | grep -v empty.txt)" ]]; then
-    echo "Error: No roles found in any account. Exiting."
-    exit 1
-fi
-
-# Combine all roles from all workspaces into one file
-cat $TEMP_DIR/*.txt > "$TEMP_DIR/all_roles.txt"
-
-# Count occurrences of each role
-sort "$TEMP_DIR/all_roles.txt" | uniq -c | sort -nr > "$TEMP_DIR/role_counts.txt"
-
-# Save roles with more than 100 occurrences to the output file, grouped by workspace
-for workspace in "${workspace_map[@]}"; do
-    grep "$workspace" $TEMP_DIR/*.txt | cut -d':' -f2 > "$TEMP_DIR/$workspace-roles.txt"
-
-    while IFS= read -r line; do
-        count=$(echo "$line" | awk '{print $1}')
-        role=$(echo "$line" | awk '{$1=""; print $0}' | sed 's/^ *//;s/ *$//')
-        if [[ $count -gt 100 ]]; then
-            echo "$workspace,$role,$count" >> "$OUTPUT_FILE"
+# Write all roles with workspace presence to the output file
+for role in "${!all_roles[@]}"; do
+    echo -n "$role" >> $OUTPUT_FILE
+    for workspace in "${workspace_map[@]}"; do
+        if [[ -n "${account_roles["$workspace,$role"]}" ]]; then
+            echo -n ",Yes" >> $OUTPUT_FILE
+        else
+            echo -n ",No" >> $OUTPUT_FILE
         fi
-    done < "$TEMP_DIR/role_counts.txt"
+    done
+    echo >> $OUTPUT_FILE
 done
 
-# Cleanup
-rm -rf $TEMP_DIR
-echo "Script execution completed. Role counts saved to $OUTPUT_FILE."
+echo "Script execution completed. Role presence across workspaces saved to $OUTPUT_FILE."
