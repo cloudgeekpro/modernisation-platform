@@ -78,7 +78,7 @@ cp "$(echo $valid_files | cut -d ' ' -f 1)" "$TEMP_DIR/common_roles.txt"
 
 for file in $valid_files; do
     echo "Processing file: $file"
-    echo "Current common roles:"
+    echo "Current common roles before processing $file:"
     cat "$TEMP_DIR/common_roles.txt"
     comm -12 <(sort -f "$TEMP_DIR/common_roles.txt") <(sort -f "$file") > "$TEMP_DIR/common_roles.tmp"
     mv "$TEMP_DIR/common_roles.tmp" "$TEMP_DIR/common_roles.txt"
