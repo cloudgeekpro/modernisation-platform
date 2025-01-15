@@ -9,7 +9,7 @@ ROOT_AWS_SESSION_TOKEN=$AWS_SESSION_TOKEN
 
 ROLE_NAME="ModernisationPlatformAccess"
 OUTPUT_FILE="common-roles-report.csv"
-MOST_COMMON_LIMIT=20  # Limit to the top N most common roles
+MOST_COMMON_LIMIT=30  # Limit to the top N most common roles
 
 ## Initialize workspace mapping
 declare -A workspace_map
@@ -59,7 +59,7 @@ process_roles() {
     for region in $regions; do
         echo "Fetching roles for account $account_id in region $region..."
         roles=$(aws iam list-roles --region "$region" \
-            --query "Roles[?!(starts_with(RoleName, 'AWSServiceRoleFor'))].[RoleName]" \
+            --query "Roles[?!(starts_with(RoleName, 'AWSServiceRoleFor') || starts_with(RoleName, 'alpha_user'))].[RoleName]" \
             --output text | sed 's/^ *//;s/ *$//')
 
         if [[ -z "$roles" ]]; then
