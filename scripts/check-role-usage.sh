@@ -49,7 +49,7 @@ for account_id in $(jq -r '.account_ids | to_entries[] | "\(.value)"' <<< "$ENVI
         echo "Roles found for account $account_id in region $region:"
         echo "$roles"
 
-        # Save roles to temp directory and sort
+        # Save roles to temp directory and normalize
         if [[ -n "$roles" ]]; then
             echo "$roles" | awk '{print tolower($0)}' | sed 's/^ *//;s/ *$//' | sort > "$TEMP_DIR/$account_id.txt"
         else
@@ -81,6 +81,8 @@ for file in $valid_files; do
     cat "$TEMP_DIR/common_roles.txt"
     comm -12 <(sort -f "$TEMP_DIR/common_roles.txt") <(sort -f "$file") > "$TEMP_DIR/common_roles.tmp"
     mv "$TEMP_DIR/common_roles.tmp" "$TEMP_DIR/common_roles.txt"
+    echo "Updated common roles:"
+    cat "$TEMP_DIR/common_roles.txt"
 done
 
 # Ensure common roles file exists
@@ -92,6 +94,7 @@ fi
 # Output common roles with Account and Last Accessed
 while IFS=',' read -r role_name; do
     grep "^$role_name," $TEMP_DIR/*.txt | awk -F',' '{print $1","$2","$3}' >> $OUTPUT_FILE
+    echo "Added common role: $role_name"
 done < "$TEMP_DIR/common_roles.txt"
 
 # Cleanup
