@@ -20,7 +20,7 @@ workspace_map[production]="prod"
 # Declare associative arrays
 declare -A account_roles
 declare -A normalized_roles
-declare -A role_counts
+declare -A all_roles
 
 # Initialize the output file with headers
 echo -n "Role Name" > $OUTPUT_FILE
