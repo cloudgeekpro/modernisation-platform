@@ -12,7 +12,7 @@ OUTPUT_FILE="common-roles-report.csv"
 TEMP_DIR="temp_roles"
 
 ## Initialize the output file with headers
-echo "Role Name" > $OUTPUT_FILE
+echo "Role Name,Account,Last Accessed" > $OUTPUT_FILE
 
 # Create a temporary directory for role files
 mkdir -p $TEMP_DIR
@@ -49,7 +49,10 @@ for account_id in $(jq -r '.account_ids | to_entries[] | "\(.value)"' <<< "$ENVI
         echo "Roles found for account $account_id in region $region:"
         echo "$roles"
         if [[ -n "$roles" ]]; then
-            echo "$roles" > "$TEMP_DIR/$account_id.txt"
+            for role_name in $roles; do
+                last_accessed=$(aws iam get-role --role-name "$role_name" --query 'Role.RoleLastUsed.LastUsedDate' --output text 2>/dev/null || echo "N/A")
+                echo "$role_name,$account_name,$last_accessed" >> "$TEMP_DIR/$account_id.txt"
+            done
         else
             echo "Warning: No roles found for account $account_id in region $region."
             touch "$TEMP_DIR/$account_id-empty.txt"
@@ -74,10 +77,10 @@ valid_files=$(ls $TEMP_DIR/*.txt | grep -v empty.txt)
 cp "$(echo $valid_files | cut -d ' ' -f 1)" "$TEMP_DIR/common_roles.txt"
 
 for file in $valid_files; do
-    echo "Processing file: $file"
+    echo "Comparing with file: $file"
     echo "Current common roles:"
     cat "$TEMP_DIR/common_roles.txt"
-    comm -12 <(sort -f "$TEMP_DIR/common_roles.txt") <(sort -f "$file") > "$TEMP_DIR/common_roles.tmp"
+    comm -12 <(sort -f "$TEMP_DIR/common_roles.txt" | cut -d ',' -f 1) <(sort -f "$file" | cut -d ',' -f 1) > "$TEMP_DIR/common_roles.tmp"
     mv "$TEMP_DIR/common_roles.tmp" "$TEMP_DIR/common_roles.txt"
 done
 
@@ -87,8 +90,10 @@ if [[ ! -s "$TEMP_DIR/common_roles.txt" ]]; then
     exit 1
 fi
 
-# Output common roles to the report
-cat "$TEMP_DIR/common_roles.txt" >> $OUTPUT_FILE
+# Output common roles with Account and Last Accessed
+while IFS=',' read -r role_name; do
+    grep "^$role_name," $TEMP_DIR/*.txt | awk -F',' '{print $1","$2","$3}' >> $OUTPUT_FILE
+done < "$TEMP_DIR/common_roles.txt"
 
 # Cleanup
 rm -rf $TEMP_DIR
