@@ -101,7 +101,6 @@ for account_id in $(jq -r '.account_ids | to_entries[] | "\(.value)"' <<< "$ENVI
     rm -f credentials.json
 done
 
-
 # Determine the most common roles
 most_common_roles=$(for role in "${!role_counts[@]}"; do
     echo "${role_counts[$role]} $role"
