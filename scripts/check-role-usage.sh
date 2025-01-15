@@ -12,7 +12,7 @@ OUTPUT_FILE="common-roles-report.csv"
 TEMP_DIR="temp_roles"
 
 ## Initialize the output file with headers
-echo "Role Name,ARN,Last Accessed" > $OUTPUT_FILE
+echo "Role Name" > $OUTPUT_FILE
 
 # Create a temporary directory for role files
 mkdir -p $TEMP_DIR
@@ -45,11 +45,11 @@ for account_id in $(jq -r '.account_ids | to_entries[] | "\(.value)"' <<< "$ENVI
         AWS_REGION=$region
 
         # List all IAM roles in the account
-        roles=$(aws iam list-roles --region "$region" --query "Roles[?!(starts_with(RoleName, 'AWSServiceRoleFor'))].[RoleName,Arn]" --output text)
+        roles=$(aws iam list-roles --region "$region" --query "Roles[?!(starts_with(RoleName, 'AWSServiceRoleFor'))].[RoleName]" --output text)
         echo "Roles found for account $account_id in region $region:"
         echo "$roles"
         if [[ -n "$roles" ]]; then
-            echo "$roles" | awk '{print $1}' > "$TEMP_DIR/$account_id.txt"
+            echo "$roles" > "$TEMP_DIR/$account_id.txt"
         else
             echo "Warning: No roles found for account $account_id in region $region."
             touch "$TEMP_DIR/$account_id-empty.txt"
@@ -74,7 +74,10 @@ valid_files=$(ls $TEMP_DIR/*.txt | grep -v empty.txt)
 cp "$(echo $valid_files | cut -d ' ' -f 1)" "$TEMP_DIR/common_roles.txt"
 
 for file in $valid_files; do
-    comm -12 <(sort "$TEMP_DIR/common_roles.txt") <(sort "$file") > "$TEMP_DIR/common_roles.tmp"
+    echo "Processing file: $file"
+    echo "Current common roles:"
+    cat "$TEMP_DIR/common_roles.txt"
+    comm -12 <(sort -f "$TEMP_DIR/common_roles.txt") <(sort -f "$file") > "$TEMP_DIR/common_roles.tmp"
     mv "$TEMP_DIR/common_roles.tmp" "$TEMP_DIR/common_roles.txt"
 done
 
@@ -84,17 +87,8 @@ if [[ ! -s "$TEMP_DIR/common_roles.txt" ]]; then
     exit 1
 fi
 
-# Output common roles with ARNs and Last Accessed Dates
-for role_name in $(cat "$TEMP_DIR/common_roles.txt"); do
-    for file in $valid_files; do
-        if grep -q "^$role_name " "$file"; then
-            arn=$(grep "^$role_name " "$file" | awk '{print $2}')
-            last_accessed=$(aws iam get-role --role-name "$role_name" --query 'Role.RoleLastUsed.LastUsedDate' --output text 2>/dev/null || echo "N/A")
-            echo "$role_name,$arn,$last_accessed" >> $OUTPUT_FILE
-            break
-        fi
-    done
-done
+# Output common roles to the report
+cat "$TEMP_DIR/common_roles.txt" >> $OUTPUT_FILE
 
 # Cleanup
 rm -rf $TEMP_DIR
