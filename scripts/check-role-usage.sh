@@ -12,7 +12,7 @@ OUTPUT_FILE="common-roles-report.csv"
 TEMP_DIR="temp_roles"
 
 ## Initialize the output file with headers
-echo "Role Name,Account,Last Accessed" > $OUTPUT_FILE
+echo "Role Name,ARN,Last Accessed" > $OUTPUT_FILE
 
 # Create a temporary directory for role files
 mkdir -p $TEMP_DIR
@@ -44,14 +44,17 @@ for account_id in $(jq -r '.account_ids | to_entries[] | "\(.value)"' <<< "$ENVI
         echo "Region: $region"
         AWS_REGION=$region
 
-        # List all IAM roles in the account
-        roles=$(aws iam list-roles --region "$region" --query "Roles[].RoleName" --output text)
+        # List all IAM roles in the account, excluding AWSServiceRoleFor
+        roles=$(aws iam list-roles --region "$region" \
+            --query "Roles[?!(starts_with(RoleName, 'AWSServiceRoleFor'))].[RoleName,Arn]" \
+            --output text | tr '\t' '\n')
+
         echo "Roles found for account $account_id in region $region:"
         echo "$roles"
 
-        # Save roles to temp directory and normalize
+        # Save roles to temp directory, normalize, and sort
         if [[ -n "$roles" ]]; then
-            echo "$roles" | awk '{print tolower($0)}' | sed 's/^ *//;s/ *$//' | sort > "$TEMP_DIR/$account_id.txt"
+            echo "$roles" | awk '{print tolower($1)}' | sed 's/^ *//;s/ *$//' | sort > "$TEMP_DIR/$account_id.txt"
             echo "Saved roles for $account_id to $TEMP_DIR/$account_id.txt"
         else
             echo "Warning: No roles found for account $account_id in region $region."
@@ -92,12 +95,14 @@ if [[ ! -s "$TEMP_DIR/common_roles.txt" ]]; then
     exit 1
 fi
 
-# Output common roles with Account and Last Accessed
+# Output common roles with ARNs and Last Accessed
 while IFS=',' read -r role_name; do
     match_found=false
     for file in $TEMP_DIR/*.txt; do
-        if grep -i -q "^$role_name," "$file"; then
-            grep -i "^$role_name," "$file" | awk -F',' '{print $1","$2","$3}' >> $OUTPUT_FILE
+        if grep -i -q "^$role_name" "$file"; then
+            arn=$(grep -i "^$role_name" "$file" | awk '{print $2}')
+            last_accessed=$(aws iam get-role --role-name "$role_name" --query 'Role.RoleLastUsed.LastUsedDate' --output text 2>/dev/null || echo "N/A")
+            echo "$role_name,$arn,$last_accessed" >> $OUTPUT_FILE
             match_found=true
             break
         fi
