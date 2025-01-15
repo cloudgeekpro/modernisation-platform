@@ -70,9 +70,9 @@ for account_id in $(jq -r '.account_ids | to_entries[] | "\(.value)"' <<< "$ENVI
     account_name=$(jq -r ".account_ids | to_entries[] | select(.value==\"$account_id\").key" <<< "$ENVIRONMENT_MANAGEMENT")
     workspace="unknown"
 
-    # Identify workspace based on account name (avoid substring conflicts)
+    # Identify workspace based on account name
     for key in "${!workspace_map[@]}"; do
-        if [[ "${account_name,,}" == *"${key,,}"* ]]; then
+        if [[ "${account_name,,}" =~ ${key,,} ]]; then
             workspace=${workspace_map[$key]}
             echo "Matched workspace '$workspace' for account name '$account_name' using key '$key'."
             break
