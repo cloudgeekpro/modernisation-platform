@@ -12,7 +12,7 @@ OUTPUT_FILE="common-roles-report.csv"
 TEMP_DIR="temp_roles"
 
 ## Initialize the output file with headers
-echo "Role Name,ARN,Last Accessed" > $OUTPUT_FILE
+echo "Role Name" > $OUTPUT_FILE
 
 # Create a temporary directory for role files
 mkdir -p $TEMP_DIR
@@ -46,7 +46,7 @@ for account_id in $(jq -r '.account_ids | to_entries[] | "\(.value)"' <<< "$ENVI
 
         # List all IAM roles in the account, excluding AWSServiceRoleFor
         roles=$(aws iam list-roles --region "$region" \
-            --query "Roles[?!(starts_with(RoleName, 'AWSServiceRoleFor'))].[RoleName,Arn]" \
+            --query "Roles[?!(starts_with(RoleName, 'AWSServiceRoleFor'))].[RoleName]" \
             --output text | tr '\t' '\n')
 
         echo "Roles found for account $account_id in region $region:"
@@ -54,7 +54,7 @@ for account_id in $(jq -r '.account_ids | to_entries[] | "\(.value)"' <<< "$ENVI
 
         # Save roles to temp directory, normalize, and sort
         if [[ -n "$roles" ]]; then
-            echo "$roles" | awk '{print tolower($1)}' | sed 's/^ *//;s/ *$//' | sort > "$TEMP_DIR/$account_id.txt"
+            echo "$roles" | awk '{print tolower($0)}' | sed 's/^ *//;s/ *$//' | sort > "$TEMP_DIR/$account_id.txt"
             echo "Saved roles for $account_id to $TEMP_DIR/$account_id.txt"
         else
             echo "Warning: No roles found for account $account_id in region $region."
@@ -81,6 +81,8 @@ cp "$(echo $valid_files | cut -d ' ' -f 1)" "$TEMP_DIR/common_roles.txt"
 
 for file in $valid_files; do
     echo "Processing file: $file"
+    echo "Current roles in temp file ($file):"
+    cat "$file"
     echo "Current common roles before processing $file:"
     cat "$TEMP_DIR/common_roles.txt"
     comm -12 <(sort -f "$TEMP_DIR/common_roles.txt") <(sort -f "$file") > "$TEMP_DIR/common_roles.tmp"
@@ -95,29 +97,8 @@ if [[ ! -s "$TEMP_DIR/common_roles.txt" ]]; then
     exit 1
 fi
 
-# Output common roles with ARNs and Last Accessed
-while IFS=',' read -r role_name; do
-    arn="N/A"
-    last_accessed="N/A"
-    match_found=false
-
-    for file in $TEMP_DIR/*.txt; do
-        if grep -i -q "^$role_name" "$file"; then
-            arn=$(grep -i "^$role_name" "$file" | awk '{print $2}')
-            last_accessed=$(aws iam get-role --role-name "$role_name" --query 'Role.RoleLastUsed.LastUsedDate' --output text 2>/dev/null || echo "N/A")
-            match_found=true
-            break
-        fi
-    done
-
-    if [ "$match_found" = true ]; then
-        echo "$role_name,$arn,$last_accessed" >> $OUTPUT_FILE
-        echo "Added common role: $role_name with ARN: $arn and Last Accessed: $last_accessed"
-    else
-        echo "$role_name,N/A,N/A" >> $OUTPUT_FILE
-        echo "Warning: Role $role_name not matched in temp files. Added with N/A values."
-    fi
-done < "$TEMP_DIR/common_roles.txt"
+# Output common roles
+cat "$TEMP_DIR/common_roles.txt" >> "$OUTPUT_FILE"
 
 # Cleanup
 rm -rf $TEMP_DIR
