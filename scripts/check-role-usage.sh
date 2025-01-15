@@ -73,7 +73,7 @@ for account_id in $(jq -r '.account_ids | to_entries[] | "\(.value)"' <<< "$ENVI
     workspace="unknown"
 
     # Identify workspace based on account name
-    for key in "${!workspace_map[@]}"; do
+    for key in $(printf "%s\n" "${!workspace_map[@]}" | awk '{print length, $0}' | sort -rn | cut -d" " -f2); do
         if [[ "${account_name,,}" == *"${key,,}"* ]]; then
             workspace=${workspace_map[$key]}
             echo "Matched workspace '$workspace' for account name '$account_name' using key '$key'."
@@ -101,8 +101,14 @@ for account_id in $(jq -r '.account_ids | to_entries[] | "\(.value)"' <<< "$ENVI
     rm -f credentials.json
 done
 
-# Write all roles with workspace presence to the output file
-for role in "${!all_roles[@]}"; do
+
+# Determine the most common roles
+most_common_roles=$(for role in "${!role_counts[@]}"; do
+    echo "${role_counts[$role]} $role"
+done | sort -nr | head -n 20 | awk '{print $2}')
+
+# Write the most common roles with workspace presence to the output file
+for role in $most_common_roles; do
     echo -n "$role" >> $OUTPUT_FILE
     for workspace in "${workspace_map[@]}"; do
         if [[ -n "${account_roles["$workspace,$role"]}" ]]; then
@@ -114,4 +120,4 @@ for role in "${!all_roles[@]}"; do
     echo >> $OUTPUT_FILE
 done
 
-echo "Script execution completed. Role presence across workspaces saved to $OUTPUT_FILE."
+echo "Script execution completed. Most common roles saved to $OUTPUT_FILE."
