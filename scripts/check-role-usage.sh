@@ -9,6 +9,7 @@ ROOT_AWS_SESSION_TOKEN=$AWS_SESSION_TOKEN
 
 ROLE_NAME="ModernisationPlatformAccess"
 OUTPUT_FILE="common-roles-report.csv"
+MOST_COMMON_LIMIT=20  # Limit to the top N most common roles
 
 ## Initialize workspace mapping
 declare -A workspace_map
@@ -20,7 +21,7 @@ workspace_map[production]="prod"
 # Declare associative arrays
 declare -A account_roles
 declare -A normalized_roles
-declare -A all_roles
+declare -A role_counts
 
 # Initialize the output file with headers
 echo -n "Role Name" > $OUTPUT_FILE
@@ -41,6 +42,7 @@ getAssumeRoleCfg() {
     export AWS_SECRET_ACCESS_KEY=$(jq -r '.Credentials.SecretAccessKey' credentials.json)
     export AWS_SESSION_TOKEN=$(jq -r '.Credentials.SessionToken' credentials.json)
 }
+
 # Normalize Role Names (Strip Suffixes)
 normalize_role_name() {
     local role_name=$1
@@ -64,15 +66,14 @@ process_roles() {
             continue
         fi
 
- # Process roles and normalize names
+        # Process roles and normalize names
         echo "Roles found for account $account_id in workspace $workspace:"
         echo "$roles"
         for role in $roles; do
             base_name=$(normalize_role_name "$role")
             account_roles["$workspace,$base_name"]="Yes"
-            all_roles["$base_name"]=1
-            # Store the original name for the base name
             normalized_roles["$base_name"]="$role"
+            role_counts["$base_name"]=$((role_counts["$base_name"] + 1))
         done
     done
 }
@@ -82,7 +83,7 @@ for account_id in $(jq -r '.account_ids | to_entries[] | "\(.value)"' <<< "$ENVI
     account_name=$(jq -r ".account_ids | to_entries[] | select(.value==\"$account_id\").key" <<< "$ENVIRONMENT_MANAGEMENT")
     workspace="unknown"
 
-     # Identify workspace based on account name
+    # Identify workspace based on account name
     for key in $(printf "%s\n" "${!workspace_map[@]}" | awk '{print length, $0}' | sort -rn | cut -d" " -f2); do
         if [[ "${account_name,,}" == *"${key,,}"* ]]; then
             workspace=${workspace_map[$key]}
@@ -114,11 +115,12 @@ done
 # Determine the most common roles
 most_common_roles=$(for role in "${!role_counts[@]}"; do
     echo "${role_counts[$role]} $role"
-done | sort -nr | head -n 20 | awk '{print $2}')
+done | sort -nr | head -n "$MOST_COMMON_LIMIT" | awk '{print $2}')
 
 # Write the most common roles with workspace presence to the output file
 for role in $most_common_roles; do
-    echo -n "$role" >> $OUTPUT_FILE
+    original_name=${normalized_roles[$role]}
+    echo -n "$original_name" >> $OUTPUT_FILE
     for workspace in "${workspace_map[@]}"; do
         if [[ -n "${account_roles["$workspace,$role"]}" ]]; then
             echo -n ",Yes" >> $OUTPUT_FILE
