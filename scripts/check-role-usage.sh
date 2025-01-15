@@ -93,8 +93,19 @@ fi
 
 # Output common roles with Account and Last Accessed
 while IFS=',' read -r role_name; do
-    grep "^$role_name," $TEMP_DIR/*.txt | awk -F',' '{print $1","$2","$3}' >> $OUTPUT_FILE
-    echo "Added common role: $role_name"
+    match_found=false
+    for file in $TEMP_DIR/*.txt; do
+        if grep -q "^$role_name," "$file"; then
+            grep "^$role_name," "$file" | awk -F',' '{print $1","$2","$3}' >> $OUTPUT_FILE
+            match_found=true
+            break
+        fi
+    done
+    if [ "$match_found" = true ]; then
+        echo "Added common role: $role_name"
+    else
+        echo "Warning: Role $role_name not found in any temp files."
+    fi
 done < "$TEMP_DIR/common_roles.txt"
 
 # Cleanup
