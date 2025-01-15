@@ -97,20 +97,25 @@ fi
 
 # Output common roles with ARNs and Last Accessed
 while IFS=',' read -r role_name; do
+    arn="N/A"
+    last_accessed="N/A"
     match_found=false
+
     for file in $TEMP_DIR/*.txt; do
         if grep -i -q "^$role_name" "$file"; then
             arn=$(grep -i "^$role_name" "$file" | awk '{print $2}')
             last_accessed=$(aws iam get-role --role-name "$role_name" --query 'Role.RoleLastUsed.LastUsedDate' --output text 2>/dev/null || echo "N/A")
-            echo "$role_name,$arn,$last_accessed" >> $OUTPUT_FILE
             match_found=true
             break
         fi
     done
+
     if [ "$match_found" = true ]; then
-        echo "Added common role: $role_name"
+        echo "$role_name,$arn,$last_accessed" >> $OUTPUT_FILE
+        echo "Added common role: $role_name with ARN: $arn and Last Accessed: $last_accessed"
     else
-        echo "Warning: Role $role_name not found in any temp files."
+        echo "$role_name,N/A,N/A" >> $OUTPUT_FILE
+        echo "Warning: Role $role_name not matched in temp files. Added with N/A values."
     fi
 done < "$TEMP_DIR/common_roles.txt"
 
