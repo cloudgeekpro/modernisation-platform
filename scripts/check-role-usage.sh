@@ -72,13 +72,18 @@ for account_id in $(jq -r '.account_ids | to_entries[] | "\(.value)"' <<< "$ENVI
     account_name=$(jq -r ".account_ids | to_entries[] | select(.value==\"$account_id\").key" <<< "$ENVIRONMENT_MANAGEMENT")
     workspace="unknown"
 
-    # Identify workspace based on account name (exact matching prioritization)
+    # Identify workspace based on account name (case-insensitive matching)
     for key in "${!workspace_map[@]}"; do
-        if [[ "$account_name" == "$key"* ]]; then
+        if [[ "${account_name,,}" == *"${key,,}"* ]]; then
             workspace=${workspace_map[$key]}
+            echo "Matched workspace '$workspace' for account name '$account_name' using key '$key'."
             break
         fi
     done
+
+    if [[ "$workspace" == "unknown" ]]; then
+        echo "Warning: Could not map account name '$account_name' to a workspace."
+    fi
 
     echo "Processing account: $account_name ($account_id) in workspace: $workspace"
     if ! getAssumeRoleCfg "$account_id"; then
