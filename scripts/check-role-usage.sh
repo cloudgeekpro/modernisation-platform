@@ -58,6 +58,8 @@ process_roles() {
         fi
 
         # Add roles to account_roles
+        echo "Roles found for account $account_id in workspace $workspace:"
+        echo "$roles"
         for role in $roles; do
             account_roles["$workspace,$role"]="Yes"
             all_roles["$role"]=1
@@ -72,7 +74,7 @@ for account_id in $(jq -r '.account_ids | to_entries[] | "\(.value)"' <<< "$ENVI
 
     # Identify workspace based on account name
     for key in "${!workspace_map[@]}"; do
-        if [[ "${account_name,,}" =~ ${key,,} ]]; then
+        if [[ "${account_name,,}" == *"${key,,}"* ]]; then
             workspace=${workspace_map[$key]}
             echo "Matched workspace '$workspace' for account name '$account_name' using key '$key'."
             break
