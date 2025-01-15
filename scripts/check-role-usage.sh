@@ -52,10 +52,12 @@ for account_id in $(jq -r '.account_ids | to_entries[] | "\(.value)"' <<< "$ENVI
         echo "Roles found for account $account_id in region $region:"
         echo "$roles"
 
-        # Save roles to temp directory, normalize, and sort
+        # Normalize role names and save to temp directory
         if [[ -n "$roles" ]]; then
             echo "$roles" | awk '{print tolower($0)}' | sed 's/^ *//;s/ *$//' | sort > "$TEMP_DIR/$account_id.txt"
             echo "Saved roles for $account_id to $TEMP_DIR/$account_id.txt"
+            echo "Roles saved for account $account_id:"
+            cat "$TEMP_DIR/$account_id.txt"
         else
             echo "Warning: No roles found for account $account_id in region $region."
             touch "$TEMP_DIR/$account_id-empty.txt"
