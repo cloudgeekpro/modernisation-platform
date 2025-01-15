@@ -19,7 +19,7 @@ workspace_map[production]="prod"
 
 # Declare associative arrays
 declare -A account_roles
-declare -A all_roles
+declare -A normalized_roles
 declare -A role_counts
 
 # Initialize the output file with headers
@@ -40,6 +40,12 @@ getAssumeRoleCfg() {
     export AWS_ACCESS_KEY_ID=$(jq -r '.Credentials.AccessKeyId' credentials.json)
     export AWS_SECRET_ACCESS_KEY=$(jq -r '.Credentials.SecretAccessKey' credentials.json)
     export AWS_SESSION_TOKEN=$(jq -r '.Credentials.SessionToken' credentials.json)
+}
+# Normalize Role Names (Strip Suffixes)
+normalize_role_name() {
+    local role_name=$1
+    # Match base name before the last underscore and ignore the suffix
+    echo "$role_name" | sed -E 's/_[a-zA-Z0-9]+$//'
 }
 
 # Fetch roles and process
