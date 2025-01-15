@@ -115,7 +115,7 @@ done
 # Determine the most common roles
 most_common_roles=$(for role in "${!role_counts[@]}"; do
     echo "${role_counts[$role]} $role"
-done | sort -nr | head -n "$MOST_COMMON_LIMIT" | awk '{print $2}')
+done | sort -nr | head -n "$MOST_COMMON_LIMIT" | awk '{print $2}' || true)
 
 # Write the most common roles with workspace presence to the output file
 for role in $most_common_roles; do
