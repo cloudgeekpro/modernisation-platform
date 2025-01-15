@@ -45,13 +45,14 @@ for account_id in $(jq -r '.account_ids | to_entries[] | "\(.value)"' <<< "$ENVI
         AWS_REGION=$region
 
         # List all IAM roles in the account
-        roles=$(aws iam list-roles --region "$region" --query "Roles[?!(starts_with(RoleName, 'AWSServiceRoleFor'))].[RoleName]" --output text)
+        roles=$(aws iam list-roles --region "$region" --query "Roles[].RoleName" --output text)
         echo "Roles found for account $account_id in region $region:"
         echo "$roles"
 
         # Save roles to temp directory and normalize
         if [[ -n "$roles" ]]; then
             echo "$roles" | awk '{print tolower($0)}' | sed 's/^ *//;s/ *$//' | sort > "$TEMP_DIR/$account_id.txt"
+            echo "Saved roles for $account_id to $TEMP_DIR/$account_id.txt"
         else
             echo "Warning: No roles found for account $account_id in region $region."
             touch "$TEMP_DIR/$account_id-empty.txt"
@@ -81,7 +82,7 @@ for file in $valid_files; do
     cat "$TEMP_DIR/common_roles.txt"
     comm -12 <(sort -f "$TEMP_DIR/common_roles.txt") <(sort -f "$file") > "$TEMP_DIR/common_roles.tmp"
     mv "$TEMP_DIR/common_roles.tmp" "$TEMP_DIR/common_roles.txt"
-    echo "Updated common roles:"
+    echo "Updated common roles after processing $file:"
     cat "$TEMP_DIR/common_roles.txt"
 done
 
@@ -95,8 +96,8 @@ fi
 while IFS=',' read -r role_name; do
     match_found=false
     for file in $TEMP_DIR/*.txt; do
-        if grep -q "^$role_name," "$file"; then
-            grep "^$role_name," "$file" | awk -F',' '{print $1","$2","$3}' >> $OUTPUT_FILE
+        if grep -i -q "^$role_name," "$file"; then
+            grep -i "^$role_name," "$file" | awk -F',' '{print $1","$2","$3}' >> $OUTPUT_FILE
             match_found=true
             break
         fi
