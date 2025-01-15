@@ -13,47 +13,46 @@ OUTPUT_FILE="ssm-automation-role-report.csv"
 ## Initialize the output file with headers
 echo "Account Name,Account ID,Region,Role Name,ARN" > $OUTPUT_FILE
 
-
-# Function to assume role and set temporary credentials
-assume_role() {
-    local account_id=$1
+# Assume Role Function
+getAssumeRoleCfg() {
+    account_id=$1
     echo "Assuming role for account: $account_id"
-    creds=$(aws sts assume-role --role-arn "arn:aws:iam::${account_id}:role/${ROLE_NAME}" --role-session-name "list-iam-roles" --output json || { 
-        echo "Error: Failed to assume role for account $account_id. Skipping..."; 
-        return 1; 
-    })
-    export AWS_ACCESS_KEY_ID=$(echo "$creds" | jq -r '.Credentials.AccessKeyId')
-    export AWS_SECRET_ACCESS_KEY=$(echo "$creds" | jq -r '.Credentials.SecretAccessKey')
-    export AWS_SESSION_TOKEN=$(echo "$creds" | jq -r '.Credentials.SessionToken')
+    if ! aws sts assume-role --role-arn "arn:aws:iam::${account_id}:role/${ROLE_NAME}" --role-session-name "list-iam-roles" --output json > credentials.json; then
+        echo "Error: Failed to assume role for account $account_id"
+        exit 1
+    fi
+    export AWS_ACCESS_KEY_ID=$(jq -r '.Credentials.AccessKeyId' credentials.json)
+    export AWS_SECRET_ACCESS_KEY=$(jq -r '.Credentials.SecretAccessKey' credentials.json)
+    export AWS_SESSION_TOKEN=$(jq -r '.Credentials.SessionToken' credentials.json)
 }
 
 # Main logic
-accounts=$(aws organizations list-accounts --query "Accounts[?Status=='ACTIVE'].[Id,Name]" --output json)
-
-for account in $(echo "$accounts" | jq -c '.[]'); do
-    account_id=$(echo "$account" | jq -r '.[0]')
-    account_name=$(echo "$account" | jq -r '.[1]')
-    
+for account_id in $(jq -r '.account_ids | to_entries[] | "\(.value)"' <<< "$ENVIRONMENT_MANAGEMENT"); do
+    account_name=$(jq -r ".account_ids | to_entries[] | select(.value==\"$account_id\").key" <<< "$ENVIRONMENT_MANAGEMENT")
     echo "Processing account: $account_name ($account_id)"
-    
-    if ! assume_role "$account_id"; then
-        echo "$account_name,$account_id,,Error,Failed to assume role" >> $OUTPUT_FILE
-        continue
-    fi
+    getAssumeRoleCfg "$account_id"
 
     for region in $regions; do
-        echo "Fetching roles for region: $region"
-        
-        roles=$(aws iam list-roles --region "$region" --query "Roles[?!(starts_with(RoleName, 'AWSServiceRoleFor'))].[RoleName,Arn]" --output json)
+        echo "Region: $region"
+        AWS_REGION=$region
 
-        for role in $(echo "$roles" | jq -c '.[]'); do
-            role_name=$(echo "$role" | jq -r '.[0]')
-            role_arn=$(echo "$role" | jq -r '.[1]')
-            echo "$account_name,$account_id,$region,$role_name,$role_arn" >> $OUTPUT_FILE
-        done
+        # List all IAM roles in the account
+        roles=$(aws iam list-roles --region $AWS_REGION --query "Roles[].[RoleName,Arn]" --output text)
+        echo "Debug: IAM roles found in account $account_id, region $region:"
+        echo "$roles"
+
+        while IFS=$'\t' read -r role_name role_arn; do
+            last_accessed=$(aws iam get-role --role-name "$role_name" --query 'Role.RoleLastUsed.LastUsedDate' --output text 2>/dev/null || echo "N/A")
+            echo "$account_name,$account_id,$region,$role_name,$role_arn,$last_accessed" >> $OUTPUT_FILE
+        done <<< "$roles"
     done
 
-    unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
+    # Reset credentials after each account
+    unset AWS_ACCESS_KEY_ID
+    unset AWS_SECRET_ACCESS_KEY
+    unset AWS_SESSION_TOKEN
+    rm -f credentials.json
+
 done
 
 echo "Script execution completed. Roles saved to $OUTPUT_FILE."
