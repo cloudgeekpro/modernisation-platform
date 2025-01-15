@@ -10,17 +10,13 @@ ROOT_AWS_SESSION_TOKEN=$AWS_SESSION_TOKEN
 ROLE_NAME="ModernisationPlatformAccess"
 OUTPUT_FILE="common-roles-report.csv"
 TEMP_DIR="temp_roles"
-COMMON_ROLES_FILE="$TEMP_DIR/common_roles.txt"
 
 ## Initialize the output file with headers
 echo "Role Name,ARN,Last Accessed" > $OUTPUT_FILE
 
-# Create temporary directory for role lists
+# Create a temporary directory for role files
 mkdir -p $TEMP_DIR
 rm -f $TEMP_DIR/*
-
-## Initialize the output file with headers
-echo "Account Name,Account ID,Region,Role Name,ARN" > $OUTPUT_FILE
 
 # Assume Role Function
 getAssumeRoleCfg() {
@@ -39,7 +35,6 @@ getAssumeRoleCfg() {
 for account_id in $(jq -r '.account_ids | to_entries[] | "\(.value)"' <<< "$ENVIRONMENT_MANAGEMENT"); do
     account_name=$(jq -r ".account_ids | to_entries[] | select(.value==\"$account_id\").key" <<< "$ENVIRONMENT_MANAGEMENT")
     echo "Processing account: $account_name ($account_id)"
-
     if ! getAssumeRoleCfg "$account_id"; then
         echo "Skipping account: $account_id due to assume role failure."
         continue
@@ -49,8 +44,10 @@ for account_id in $(jq -r '.account_ids | to_entries[] | "\(.value)"' <<< "$ENVI
         echo "Region: $region"
         AWS_REGION=$region
 
-        # List all IAM roles in the account, excluding AWSServiceRoleFor
-        roles=$(aws iam list-roles --region "$region" --query "Roles[?!(starts_with(RoleName, 'AWSServiceRoleFor'))].[RoleName,Arn]" --output text)
+        # List all IAM roles in the account
+        roles=$(aws iam list-roles --region $AWS_REGION --query "Roles[?!(starts_with(RoleName, 'AWSServiceRoleFor'))].[RoleName,Arn]" --output text)
+        echo "Roles found for account $account_id in region $region:"
+        echo "$roles"
         if [[ -n "$roles" ]]; then
             echo "$roles" | awk '{print $1}' > "$TEMP_DIR/$account_id.txt"
         else
@@ -65,8 +62,37 @@ for account_id in $(jq -r '.account_ids | to_entries[] | "\(.value)"' <<< "$ENVI
     rm -f credentials.json
 done
 
-# Ensure temporary files exist
-if [[ $(ls $TEMP_DIR | wc -l) -eq 0 ]]; then
+# Check temp files
+if [[ -z "$(ls -A $TEMP_DIR)" ]]; then
     echo "Error: No roles found in any account. Exiting."
     exit 1
 fi
+
+# Find common roles across all accounts
+cp "$(ls $TEMP_DIR | head -n 1)" "$TEMP_DIR/common_roles.txt"
+for file in $TEMP_DIR/*.txt; do
+    comm -12 <(sort "$TEMP_DIR/common_roles.txt") <(sort "$file") > "$TEMP_DIR/common_roles.tmp"
+    mv "$TEMP_DIR/common_roles.tmp" "$TEMP_DIR/common_roles.txt"
+done
+
+# Ensure common roles file exists
+if [[ ! -s "$TEMP_DIR/common_roles.txt" ]]; then
+    echo "Error: No common roles found across accounts."
+    exit 1
+fi
+
+# Output common roles with ARNs and Last Accessed Dates
+for role_name in $(cat "$TEMP_DIR/common_roles.txt"); do
+    for file in $TEMP_DIR/*.txt; do
+        if grep -q "^$role_name " "$file"; then
+            arn=$(grep "^$role_name " "$file" | awk '{print $2}')
+            last_accessed=$(aws iam get-role --role-name "$role_name" --query 'Role.RoleLastUsed.LastUsedDate' --output text 2>/dev/null || echo "N/A")
+            echo "$role_name,$arn,$last_accessed" >> $OUTPUT_FILE
+            break
+        fi
+    done
+done
+
+# Cleanup
+rm -rf $TEMP_DIR
+echo "Script execution completed. Common roles saved to $OUTPUT_FILE."
