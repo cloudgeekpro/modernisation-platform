@@ -58,11 +58,15 @@ process_roles() {
             continue
         fi
 
-        # Add roles to account_roles and increment counts
+ # Process roles and normalize names
+        echo "Roles found for account $account_id in workspace $workspace:"
+        echo "$roles"
         for role in $roles; do
-            account_roles["$workspace,$role"]="Yes"
-            all_roles["$role"]=1
-            ((role_counts["$role"]++))
+            base_name=$(normalize_role_name "$role")
+            account_roles["$workspace,$base_name"]="Yes"
+            all_roles["$base_name"]=1
+            # Store the original name for the base name
+            normalized_roles["$base_name"]="$role"
         done
     done
 }
@@ -72,8 +76,8 @@ for account_id in $(jq -r '.account_ids | to_entries[] | "\(.value)"' <<< "$ENVI
     account_name=$(jq -r ".account_ids | to_entries[] | select(.value==\"$account_id\").key" <<< "$ENVIRONMENT_MANAGEMENT")
     workspace="unknown"
 
-    # Identify workspace based on account name (case-insensitive matching)
-    for key in "${!workspace_map[@]}"; do
+     # Identify workspace based on account name
+    for key in $(printf "%s\n" "${!workspace_map[@]}" | awk '{print length, $0}' | sort -rn | cut -d" " -f2); do
         if [[ "${account_name,,}" == *"${key,,}"* ]]; then
             workspace=${workspace_map[$key]}
             echo "Matched workspace '$workspace' for account name '$account_name' using key '$key'."
