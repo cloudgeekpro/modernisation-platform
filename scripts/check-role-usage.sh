@@ -50,12 +50,9 @@ for account_id in $(jq -r '.account_ids | to_entries[] | "\(.value)"' <<< "$ENVI
         done <<< "$roles"
     done
 
-    # Reset credentials after each account
-    unset AWS_ACCESS_KEY_ID
-    unset AWS_SECRET_ACCESS_KEY
-    unset AWS_SESSION_TOKEN
-    rm -f credentials.json
-
+     # Reset credentials after each account
+    export AWS_ACCESS_KEY_ID=$ROOT_AWS_ACCESS_KEY_ID
+    export AWS_SECRET_ACCESS_KEY=$ROOT_AWS_SECRET_ACCESS_KEY
+    export AWS_SESSION_TOKEN=$ROOT_AWS_SESSION_TOKEN
+    rm credentials.json
 done
-
-echo "Script execution completed. Roles saved to $OUTPUT_FILE."
