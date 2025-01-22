@@ -37,7 +37,7 @@ jobs:
               aws-region: ${{ env.AWS_REGION }}
 
           - name: Run IAM Script
-            run: bash ./scripts/check_terraform_workspaces.sh
+            run: bash ./scripts/check-terraform-workspaces.sh
 
           - name: Upload Role CSV file
             uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
