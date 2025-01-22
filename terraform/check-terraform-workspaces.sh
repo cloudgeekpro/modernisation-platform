@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Use the first script argument as the base directory or default to the current directory
+# Use the first argument as the base directory or default to the current directory
 BASE_DIR=${1:-"."}
 
 # Output CSV file
@@ -19,24 +19,30 @@ find "$BASE_DIR" -type d ! -path "*/.terraform/*" | while read -r WORKING_DIRECT
     echo "================================================================="
     echo "Processing working directory: $WORKING_DIRECTORY"
 
-    # Skip invalid or missing directories
-    if [ ! -d "$WORKING_DIRECTORY" ] || [ -L "$WORKING_DIRECTORY" ]; then
+    # Skip invalid directories or those that no longer exist
+    if [ ! -d "$WORKING_DIRECTORY" ]; then
         echo "Warning: Directory '$WORKING_DIRECTORY' is invalid or no longer exists. Skipping..."
         continue
     fi
 
+    # Navigate to the directory
     cd "$WORKING_DIRECTORY" || continue
 
-    # Check for Terraform configuration files (.tf)
+    # Ensure the directory contains Terraform configuration files (.tf)
     if ! ls *.tf > /dev/null 2>&1; then
         echo "No Terraform configuration files found in '$WORKING_DIRECTORY'. Skipping..."
         continue
     fi
 
-    # List all Terraform workspaces in the directory
-    echo "Listing workspaces for $WORKING_DIRECTORY..."
-    WORKSPACES=$(terraform workspace list 2>/dev/null | sed 's/^[* ]*//')
+    # Initialize Terraform (silent if already initialized)
+    terraform init -input=false > /dev/null 2>&1
+    if [ $? -ne 0 ]; then
+        echo "Error: Terraform initialization failed in '$WORKING_DIRECTORY'. Skipping..."
+        continue
+    fi
 
+    # List all Terraform workspaces in the directory
+    WORKSPACES=$(terraform workspace list 2>/dev/null | sed 's/^[* ]*//')
     if [ -z "$WORKSPACES" ]; then
         echo "No workspaces found in '$WORKING_DIRECTORY'. Skipping..."
         continue
