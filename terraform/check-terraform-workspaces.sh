@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# Base directory to scan for Terraform directories
-BASE_DIR="/Users/khatra.farah/Desktop/modernisation-platform/terraform"
+# Use the first script argument as the base directory or default to the current directory
+BASE_DIR=${1:-"."}
 
 # Output CSV file
 OUTPUT_FILE="terraform_workspaces_and_resources.csv"
@@ -19,9 +19,9 @@ find "$BASE_DIR" -type d ! -path "*/.terraform/*" | while read -r WORKING_DIRECT
     echo "================================================================="
     echo "Processing working directory: $WORKING_DIRECTORY"
 
-    # Navigate to the directory
-    if [ ! -d "$WORKING_DIRECTORY" ]; then
-        echo "Error: Directory '$WORKING_DIRECTORY' does not exist."
+    # Skip invalid or missing directories
+    if [ ! -d "$WORKING_DIRECTORY" ] || [ -L "$WORKING_DIRECTORY" ]; then
+        echo "Warning: Directory '$WORKING_DIRECTORY' is invalid or no longer exists. Skipping..."
         continue
     fi
 
