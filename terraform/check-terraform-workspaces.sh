@@ -2,39 +2,42 @@
 
 # Function to count resources in a given workspace
 count_resources_in_workspace() {
-  local terraform_dir="$1"
-  local workspace="$2"
+    local terraform_dir="$1"
+    local workspace="$2"
 
-  # Switch to the specified workspace
-  if ! (cd "$terraform_dir" && terraform workspace select "$workspace" > /dev/null 2>&1); then
-      echo "Error: Failed to select workspace '$workspace' in '$terraform_dir'" >&2
-      return 1
-  fi
+    echo "DEBUG: Counting resources in workspace '$workspace' in '$terraform_dir'" >&2
 
-
-  # Get Terraform state as JSON
-  state_json=$(terraform state pull 2>/dev/null)
-
-  if [[ -z "$state_json" ]]; then
-      echo "Error: Failed to pull state for workspace '$workspace' in '$terraform_dir'" >&2
-      return 1
-  fi
-
-
-  # Check if the state is empty
-    if [[ "$state_json" == *"\"resources\": []"* || "$state_json" == *'"resources": null'* ]]; then
-      return 0
+    # Switch to the specified workspace
+    if ! (cd "$terraform_dir" && terraform workspace select "$workspace" > /dev/null 2>&1); then
+        echo "Error: Failed to select workspace '$workspace' in '$terraform_dir'" >&2
+        return 1
     fi
 
-  # Count the resources (we use jq to count the items in array)
-  resource_count=$(echo "$state_json" | jq '.resources | length' 2>/dev/null)
+    # Get Terraform state as JSON
+    state_json=$(terraform state pull 2>/dev/null)
 
-   if [[ -z "$resource_count" ]]; then
+    if [[ -z "$state_json" ]]; then
+        echo "Error: Failed to pull state for workspace '$workspace' in '$terraform_dir'" >&2
+        return 1
+    fi
+  
+  # Check if the state is empty
+    if [[ "$state_json" == *"\"resources\": []"* || "$state_json" == *'"resources": null'* ]]; then
+        echo "DEBUG: Workspace '$workspace' has no resources (empty state)." >&2
+        return 0
+    fi
+
+
+    # Count the resources (we use jq to count the items in array)
+    resource_count=$(echo "$state_json" | jq '.resources | length' 2>/dev/null)
+
+    if [[ -z "$resource_count" ]]; then
         echo "Error parsing resources from state for workspace '$workspace' in '$terraform_dir'" >&2
         return 1
-   fi
+    fi
 
-  echo "$resource_count"
+    echo "DEBUG: Workspace '$workspace' has $resource_count resources." >&2
+    echo "$resource_count"
 }
 
 # Use the first argument as the base directory or default to the current directory
@@ -71,10 +74,11 @@ find "$BASE_DIR" -type d ! -path "*/.terraform/*" -print0 | while IFS= read -r -
     fi
 
     # Initialize Terraform (silent if already initialized)
+    echo "DEBUG: Running terraform init in '$WORKING_DIRECTORY' for listing workspaces" >&2
     terraform init -input=false -no-color > /dev/null 2>&1
     if [ $? -ne 0 ]; then
-        echo "Error: Terraform initialization failed in '$WORKING_DIRECTORY'. Skipping..." >&2
-        continue
+      echo "Error: Terraform initialization failed in '$WORKING_DIRECTORY'. Skipping..." >&2
+      continue
     fi
 
     # Get the list of workspaces using terraform workspace list
@@ -84,30 +88,42 @@ find "$BASE_DIR" -type d ! -path "*/.terraform/*" -print0 | while IFS= read -r -
         continue
     fi
 
-   # Iterate through each workspace
-   while IFS= read -r WORKSPACE; do
+
+    # Iterate through each workspace
+    while IFS= read -r WORKSPACE; do
       echo "--------------------------------------" >&2
       echo "Workspace: $WORKSPACE" >&2
 
       # Count resources and display the result
-       resource_count=$(count_resources_in_workspace "$WORKING_DIRECTORY" "$WORKSPACE")
-       if [[ $? -eq 0 ]]; then
-          if [[ -z "$resource_count" ]]; then
-               echo "Workspace '$WORKSPACE' has no resources." >&2
-               resource_count=0
-          else
-            echo "Workspace '$WORKSPACE' has $resource_count resource(s)." >&2
-          fi
+      resource_count=$(count_resources_in_workspace "$WORKING_DIRECTORY" "$WORKSPACE")
+      if [[ $? -eq 0 ]]; then
+           if [[ -z "$resource_count" ]]; then
+                echo "Workspace '$WORKSPACE' has no resources." >&2
+                resource_count=0
+           else
+                echo "Workspace '$WORKSPACE' has $resource_count resource(s)." >&2
+           fi
            # Append results to the CSV file
           echo "$WORKING_DIRECTORY,$WORKSPACE,$resource_count" >> "$OUTPUT_FILE"
+      else
+          echo "Error: Resource count failed for workspace '$WORKSPACE' in '$WORKING_DIRECTORY'" >&2
       fi
-  done <<< "$WORKSPACES"
+    done <<< "$WORKSPACES"
 
     # Reset AWS credentials after processing the current directory
     export AWS_ACCESS_KEY_ID=$ROOT_AWS_ACCESS_KEY_ID
     export AWS_SECRET_ACCESS_KEY=$ROOT_AWS_SECRET_ACCESS_KEY
     export AWS_SESSION_TOKEN=$ROOT_AWS_SESSION_TOKEN
     rm -f credentials.json
+
+
+     # Initialize Terraform after processing the directory to reset state
+    echo "DEBUG: Running terraform init again in '$WORKING_DIRECTORY' to reset state" >&2
+    terraform init -input=false -no-color > /dev/null 2>&1
+     if [ $? -ne 0 ]; then
+          echo "Error: Terraform initialization failed after processing directory '$WORKING_DIRECTORY'. Skipping..." >&2
+     fi
+
 
     # Return to the base directory
     cd "$BASE_DIR" || exit
