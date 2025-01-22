@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Base directory to scan for Terraform directories
-BASE_DIR="."
+BASE_DIR="/modernisation-platform/terraform"
 
 # Output CSV file
 OUTPUT_FILE="terraform_workspaces_and_resources.csv"
