@@ -1,4 +1,4 @@
-name: "IAM Role List"
+name: "Terraform workspaces"
 
 on:
     push:
@@ -36,7 +36,7 @@ jobs:
               role-session-name: githubactionsrolesession
               aws-region: ${{ env.AWS_REGION }}
 
-          - name: Run IAM Script
+          - name: Run Script
             run: bash ./scripts/check-terraform-workspaces.sh
 
           - name: Upload Role CSV file
