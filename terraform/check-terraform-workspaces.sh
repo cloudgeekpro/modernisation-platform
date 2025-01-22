@@ -2,6 +2,7 @@
 
 # Use the first argument as the base directory or default to the current directory
 BASE_DIR=${1:-"."}
+echo "DEBUG: Base directory is '$BASE_DIR'"
 
 # Output CSV file
 OUTPUT_FILE="terraform_workspaces_and_resources.csv"
@@ -16,8 +17,7 @@ export ROLE_NAME="ModernisationPlatformAccess"
 
 # Find all Terraform project directories (exclude .terraform subdirectories)
 find "$BASE_DIR" -type d ! -path "*/.terraform/*" | while read -r WORKING_DIRECTORY; do
-    echo "================================================================="
-    echo "Processing working directory: $WORKING_DIRECTORY"
+    echo "DEBUG: Checking directory '$WORKING_DIRECTORY'"
 
     # Skip invalid directories or those that no longer exist
     if [ ! -d "$WORKING_DIRECTORY" ]; then
@@ -25,7 +25,6 @@ find "$BASE_DIR" -type d ! -path "*/.terraform/*" | while read -r WORKING_DIRECT
         continue
     fi
 
-    # Navigate to the directory
     cd "$WORKING_DIRECTORY" || continue
 
     # Ensure the directory contains Terraform configuration files (.tf)
