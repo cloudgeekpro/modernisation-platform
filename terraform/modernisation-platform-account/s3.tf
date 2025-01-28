@@ -160,7 +160,7 @@ data "aws_iam_policy_document" "state-bucket-policy" {
     content {
       effect    = "Allow"
       actions = ["s3:ListBucket"]
-      resources = [for resource in statement.value.resources : "${resource}"]
+      resources = [module.state-bucket.bucket.arn]
       principals {
         type = "AWS"
         identifiers = [statement.value.identifiers]
@@ -175,6 +175,27 @@ data "aws_iam_policy_document" "state-bucket-policy" {
       }
     }
   }
+  dynamic "statement" {
+    for_each = local.terraform_state_access
+    content {
+      effect    = "Allow"
+      actions = ["s3:GetObject"]
+      resources = [module.state-bucket.bucket.arn, a for expression to create a resource for each path by appending it to the bucket arn]
+      principals {
+        type = "AWS"
+        identifiers = [statement.value.identifiers]
+      }
+      dynamic "condition" {
+        for_each  = statement.value.conditions
+        content {
+          test = condition.value.test
+          values = condition.value.values
+          variable = condition.value.variable
+        }
+      }
+    }
+  }
+
 }
 
 data "aws_iam_policy_document" "allow-state-access-from-root-account" {

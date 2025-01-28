@@ -27,7 +27,23 @@ locals {
     root_users = {
       conditions  = {}
       identifiers = local.root_users_with_state_access
-      resources   = [module.state-bucket.bucket.arn, module.another-bucket.bucket.arn]
+      paths = ["/"]
+    }
+    aws_org_access = {
+      conditions = {
+        1 = {
+      test     = "ForAnyValue:StringLike"
+      variable = "aws:PrincipalOrgPaths"
+      values   = ["${data.aws_organizations_organization.root_account.id}/*/${local.environment_management.modernisation_platform_organisation_unit_id}/*"]
+        }
+      }
+      identifiers = "*"
+      paths   = [
+      "/terraform.tfstate",
+      "/terraform.tfstate.tflock",
+      "/environments/members/*",
+      "/environments/accounts/core-network-services/*"
+      ]
     }
   }
 }
