@@ -22,4 +22,12 @@ locals {
   }
 
   replica_region = "eu-west-1"
+
+  terraform_state_access = {
+    root_users = {
+      conditions  = {}
+      identifiers = local.root_users_with_state_access
+      resources   = [module.state-bucket.bucket.arn, module.another-bucket.bucket.arn]
+    }
+  }
 }
