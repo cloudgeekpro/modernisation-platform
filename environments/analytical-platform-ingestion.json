@@ -3,7 +3,7 @@
   "components": [
     {
       "name": "transfer-family",
-      "sso_group_name": "analytical-platform"
+      "sso_group_name": "analytical-platform-engineers"
     }
   ],
   "codeowners": ["analytical-platform-engineers"],
